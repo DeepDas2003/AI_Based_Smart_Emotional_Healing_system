@@ -143,8 +143,3 @@ if __name__ == "__main__":
     print("[INFO] Evaluation phase completed. Switching to live heartbeat mode...", flush=True)
 
     #  Phase 2: Keep alive + visible activity
-    counter = 0
-    while True:
-        counter += 1
-        print(f"[HEARTBEAT] system_alive tick={counter}", flush=True)
-        time.sleep(10)
