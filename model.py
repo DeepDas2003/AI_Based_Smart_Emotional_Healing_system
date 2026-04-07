@@ -56,3 +56,4 @@ class EmotionResNet(nn.Module):
         x = self.pool(x)
         return self.fc(x)
       
+torch.save(model.state_dict(), "emotion_resnet_weights.pth")
