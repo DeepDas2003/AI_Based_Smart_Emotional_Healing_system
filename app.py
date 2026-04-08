@@ -1,7 +1,7 @@
 import torch
 from ultralytics.nn.tasks import DetectionModel
 
-# Fix for torch safe loading
+# Fix torch safe loading (YOLO)
 torch.serialization.add_safe_globals([DetectionModel])
 
 import gradio as gr
@@ -10,6 +10,10 @@ import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 from my_env import EmotionEnv
+
+# FastAPI
+from fastapi import FastAPI
+import uvicorn
 
 # ==============================
 # Config
@@ -20,14 +24,21 @@ ENV_NAME = "custom-env"
 MODEL_NAME = "local-emotion-model"
 
 # ==============================
-# Load
+# Load Models
 # ==============================
 yolo_model = YOLO(YOLO_PATH)
 env = EmotionEnv()
 
-# Global tracking
+# ==============================
+# Global Tracking
+# ==============================
 reward_history = []
 started = False
+
+# ==============================
+# FastAPI App
+# ==============================
+app = FastAPI()
 
 # ==============================
 # Helper
@@ -38,7 +49,7 @@ def get_best_box(boxes):
     return tuple(map(int, boxes[0].xyxy[0]))
 
 # ==============================
-# Main Function
+# Main Processing
 # ==============================
 def process_frame(frame):
     global reward_history, started
@@ -52,7 +63,6 @@ def process_frame(frame):
             print(f"[START] task={TASK_NAME} env={ENV_NAME} model={MODEL_NAME}")
             started = True
 
-        # Convert
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # YOLO detection
@@ -79,7 +89,7 @@ def process_frame(frame):
         reward_history.append(reward)
         step_num = len(reward_history)
 
-        # FORMAT FIXES
+        # Format
         done_str = "true" if done else "false"
         reward_str = f"{reward:.2f}"
 
@@ -90,7 +100,6 @@ def process_frame(frame):
         if done:
             success = obs["emotion"] in ["neutral", "happy"]
             success_str = "true" if success else "false"
-
             rewards_str = ",".join([f"{r:.2f}" for r in reward_history])
 
             print(f"[END] success={success_str} steps={step_num} rewards={rewards_str}")
@@ -100,10 +109,10 @@ def process_frame(frame):
             started = False
             env.reset()
 
-        # Draw box
+        # Draw bounding box
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-        # UI Output (separate from logs)
+        # UI Output
         ui_text = (
             f"Step: {obs['steps']}\n"
             f"Emotion: {obs['emotion']}\n"
@@ -128,7 +137,7 @@ def process_frame(frame):
         return None, f"Error: {str(e)}"
 
 # ==============================
-# Reset
+# Gradio Reset
 # ==============================
 def reset_env():
     global reward_history, started
@@ -138,10 +147,33 @@ def reset_env():
     return None, "Environment Reset"
 
 # ==============================
-# UI
+# FastAPI Endpoints (IMPORTANT)
+# ==============================
+@app.get("/")
+def root():
+    return {"status": "running"}
+
+@app.post("/reset")
+def api_reset():
+    global reward_history, started
+    reward_history = []
+    started = False
+    obs = env.reset()
+    return {
+        "obs": obs,
+        "message": "Environment reset successful"
+    }
+
+@app.post("/step")
+def api_step():
+    result = env.step("api-action")
+    return result
+
+# ==============================
+# Gradio UI
 # ==============================
 with gr.Blocks() as demo:
-    gr.Markdown("## Emotion Healing System (Webcam + Evaluator Logs)")
+    gr.Markdown("## Emotion Healing System (Webcam + OpenEnv Logs)")
 
     webcam = gr.Image(sources=["webcam"], type="numpy")
     output = gr.Textbox(lines=12)
@@ -150,4 +182,13 @@ with gr.Blocks() as demo:
         gr.Button("Detect Emotion").click(process_frame, webcam, [webcam, output])
         gr.Button("Reset").click(reset_env, None, [webcam, output])
 
-demo.launch(server_name="0.0.0.0", server_port=7860)
+# ==============================
+# Mount Gradio to FastAPI
+# ==============================
+app = gr.mount_gradio_app(app, demo, path="/")
+
+# ==============================
+# Run Server
+# ==============================
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=7860)
