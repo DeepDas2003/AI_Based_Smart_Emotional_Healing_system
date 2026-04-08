@@ -67,6 +67,10 @@ Set the following environment variables:
 - MODEL_NAME
 - HF_TOKEN
 
+running
+
+python app.py
+
 ***Baseline Performance***
 Baseline metrics will be updated after evaluation and testing.
 For example 
@@ -74,7 +78,5 @@ set API_BASE_URL=https://api.openai.com/v1
 set MODEL_NAME=gpt-4.1-mini
 set HF_TOKEN=your_huggingface_token
 
-*running*
 
-python app.py
 
