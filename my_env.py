@@ -3,8 +3,6 @@ from torchvision import transforms
 from PIL import Image
 from model import EmotionResNet
 
-MODEL_PATH = "./third_best_model.pth"
-
 EMOTION_ADVICE = {
     "angry": "Take deep breaths and count to 10.",
     "disgust": "Focus on something pleasant or neutral.",
@@ -14,6 +12,8 @@ EMOTION_ADVICE = {
     "sad": "Talk to someone or do a small activity.",
     "surprise": "Stay calm and think clearly."
 }
+
+MODEL_PATH = "./third_best_model.pth"
 
 class EmotionEnv:
     def __init__(self):
@@ -47,29 +47,39 @@ class EmotionEnv:
             img = Image.fromarray(img)
         prev_emotion = self.emotion
         self.steps += 1
+
         img_gray = img.convert("L")
         tensor = self.transform(img_gray).unsqueeze(0).to(self.device)
         with torch.no_grad():
             outputs = self.model(tensor)
             probs = torch.softmax(outputs, dim=1)
             confidence, pred = torch.max(probs, 1)
+
         self.emotion = self.label_map[pred.item()]
         self.confidence = confidence.item()
         reward = self._compute_reward(prev_emotion, self.emotion)
         self.total_reward += reward
         self.history.append({"prev": prev_emotion, "new": self.emotion, "reward": reward})
-        done = self.steps >= self.max_steps or self.emotion=="happy" or self._check_no_improvement()
+
+        done = self.steps >= self.max_steps
         task_status = self._get_task_status()
+
         result = {
-            "obs": {"emotion": self.emotion, "confidence": round(self.confidence,3),
-                    "steps": self.steps, "advice": EMOTION_ADVICE.get(self.emotion,"")},
+            "obs": {
+                "emotion": self.emotion,
+                "confidence": round(self.confidence,3),
+                "steps": self.steps,
+                "advice": EMOTION_ADVICE.get(self.emotion,"")
+            },
             "reward": round(reward,3),
             "total_reward": round(self.total_reward,3),
             "done": done,
             "task_status": task_status
         }
+
         if done:
             self.reset()
+
         return result
 
     def _compute_reward(self, prev, curr):
@@ -84,17 +94,13 @@ class EmotionEnv:
         if prev==positive[1] and curr==positive[0]: return 0.5
         return 0.0
 
-    def _check_no_improvement(self):
-        if len(self.history)<3: return False
-        last3 = [h["new"] for h in self.history[-3:]]
-        negative = ["angry","disgust","fear","sad"]
-        return all(e in negative for e in last3)
-
     def _get_task_status(self):
-        if self.emotion in ["neutral","happy"]:
-            if self.steps <=4: return "Task 1 (Easy) Completed"
-            elif self.steps <=8: return "Task 2 (Medium) Completed"
-            else: return "Task 3 (Hard) Completed"
-        if self.steps>=self.max_steps:
-            return "Max Steps Reached (Try Again)"
+        if self.steps <=4 and self.emotion in ["happy","neutral"]:
+            return "Task 1 (Easy) Completed"
+        elif self.steps <=8 and self.emotion in ["happy","neutral"]:
+            return "Task 2 (Medium) Completed"
+        elif self.steps <=12 and self.emotion in ["happy","neutral"]:
+            return "Task 3 (Hard) Completed"
+        elif self.steps>=self.max_steps:
+            return "Max Steps Reached"
         return ""
