@@ -1,194 +1,102 @@
 import torch
-from ultralytics.nn.tasks import DetectionModel
-
-# Fix torch safe loading (YOLO)
-torch.serialization.add_safe_globals([DetectionModel])
-
-import gradio as gr
 import cv2
-import numpy as np
 from PIL import Image
+import gradio as gr
 from ultralytics import YOLO
 from my_env import EmotionEnv
 
-# FastAPI
-from fastapi import FastAPI
-import uvicorn
-
-# ==============================
-# Config
-# ==============================
+# =========================
+# YOLO Face Detection
+# =========================
 YOLO_PATH = "yolov8n-face-lindevs.pt"
-TASK_NAME = "emotion-healing"
-ENV_NAME = "custom-env"
-MODEL_NAME = "local-emotion-model"
-
-# ==============================
-# Load Models
-# ==============================
 yolo_model = YOLO(YOLO_PATH)
-env = EmotionEnv()
 
-# ==============================
-# Global Tracking
-# ==============================
-reward_history = []
-started = False
-
-# ==============================
-# FastAPI App
-# ==============================
-app = FastAPI()
-
-# ==============================
-# Helper
-# ==============================
 def get_best_box(boxes):
     if boxes is None or len(boxes) == 0:
         return None
     return tuple(map(int, boxes[0].xyxy[0]))
 
-# ==============================
-# Main Processing
-# ==============================
-def process_frame(frame):
-    global reward_history, started
+# =========================
+# Environment + Global Counters
+# =========================
+env = EmotionEnv()
+current_step = 0
+total_reward = 0.0
+session_started = False
 
+# =========================
+# Step function
+# =========================
+def process_step(frame):
+    global current_step, total_reward, session_started
     if frame is None:
-        return None, "No image"
+        return None, "⚠️ Please capture image from webcam", current_step, total_reward
 
-    try:
-        # START (only once)
-        if not started:
-            print(f"[START] task={TASK_NAME} env={ENV_NAME} model={MODEL_NAME}")
-            started = True
+    # Start logging
+    if not session_started:
+        print("[START] task=emotion-healing env=custom-env")
+        session_started = True
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = yolo_model.predict(frame, device="cpu", verbose=False)
+    boxes = results[0].boxes
+    best_box = get_best_box(boxes)
+    if best_box is None:
+        return Image.fromarray(frame_rgb), "❌ No face detected", current_step, total_reward
 
-        # YOLO detection
-        results = yolo_model.predict(frame, device="cpu", verbose=False)
-        boxes = results[0].boxes
-        best_box = get_best_box(boxes)
+    x1, y1, x2, y2 = best_box
+    face = frame[y1:y2, x1:x2]
+    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+    face_pil = Image.fromarray(gray)
 
-        if best_box is None:
-            return Image.fromarray(frame_rgb), "No face detected"
+    # Step environment
+    result = env.step(face_pil)
+    obs = result["obs"]
+    reward = result["reward"]
+    current_step = obs["steps"]
+    total_reward = result["total_reward"]
 
-        x1, y1, x2, y2 = best_box
+    # Log to HF console
+    print(f"[STEP] step={current_step} emotion={obs['emotion']} reward={reward:.2f} total_reward={total_reward:.2f} task_status={result['task_status']}")
 
-        # Crop + grayscale
-        face = frame[y1:y2, x1:x2]
-        gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
-        face_pil = Image.fromarray(gray)
+    # Draw box
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    output = (
+        f"Step: {current_step}\n"
+        f"Emotion: {obs['emotion']} | Confidence: {obs['confidence']:.2f}\n"
+        f"Reward this step: {reward:.2f}\n"
+        f"Total Reward: {total_reward:.2f}\n"
+        f"Task Status: {result['task_status']}\n"
+        f"Advice: {obs['advice']}"
+    )
+    return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)), output, current_step, total_reward
 
-        # Env step
-        result = env.step(face_pil)
-        obs = result["obs"]
-        reward = float(result["reward"])
-        done = result.get("done", False)
-
-        reward_history.append(reward)
-        step_num = len(reward_history)
-
-        # Format
-        done_str = "true" if done else "false"
-        reward_str = f"{reward:.2f}"
-
-        # STEP LOG
-        print(f"[STEP] step={step_num} action={obs['emotion']} reward={reward_str} done={done_str} error=null")
-
-        # END LOG
-        if done:
-            success = obs["emotion"] in ["neutral", "happy"]
-            success_str = "true" if success else "false"
-            rewards_str = ",".join([f"{r:.2f}" for r in reward_history])
-
-            print(f"[END] success={success_str} steps={step_num} rewards={rewards_str}")
-
-            # Reset
-            reward_history = []
-            started = False
-            env.reset()
-
-        # Draw bounding box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-        # UI Output
-        ui_text = (
-            f"Step: {obs['steps']}\n"
-            f"Emotion: {obs['emotion']}\n"
-            f"Confidence: {obs['confidence']}\n"
-            f"Reward: {reward_str}\n"
-            f"Total Reward: {result['total_reward']:.2f}\n"
-            f"Advice: {obs['advice']}"
-        )
-
-        return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)), ui_text
-
-    except Exception as e:
-        step_num = len(reward_history) + 1
-
-        print(f"[STEP] step={step_num} action=null reward=0.00 done=true error={str(e)}")
-        print(f"[END] success=false steps={step_num} rewards=0.00")
-
-        reward_history.clear()
-        started = False
-        env.reset()
-
-        return None, f"Error: {str(e)}"
-
-# ==============================
-# Gradio Reset
-# ==============================
 def reset_env():
-    global reward_history, started
-    reward_history = []
-    started = False
+    global current_step, total_reward, session_started
     env.reset()
-    return None, "Environment Reset"
+    print(f"[END] total_reward={total_reward:.2f}")
+    current_step = 0
+    total_reward = 0.0
+    session_started = False
+    return None, "Environment Reset", current_step, total_reward
 
-# ==============================
-# FastAPI Endpoints (IMPORTANT)
-# ==============================
-@app.get("/")
-def root():
-    return {"status": "running"}
-
-@app.post("/reset")
-def api_reset():
-    global reward_history, started
-    reward_history = []
-    started = False
-    obs = env.reset()
-    return {
-        "obs": obs,
-        "message": "Environment reset successful"
-    }
-
-@app.post("/step")
-def api_step():
-    result = env.step("api-action")
-    return result
-
-# ==============================
+# =========================
 # Gradio UI
-# ==============================
+# =========================
 with gr.Blocks() as demo:
-    gr.Markdown("## Emotion Healing System (Webcam + OpenEnv Logs)")
+    gr.Markdown("## 🎥 Emotion Detection using Webcam (Step & Reward Tracker)")
 
     webcam = gr.Image(sources=["webcam"], type="numpy")
     output = gr.Textbox(lines=12)
+    step_display = gr.Number(label="Current Step", value=0)
+    reward_display = gr.Number(label="Total Reward", value=0.0)
 
     with gr.Row():
-        gr.Button("Detect Emotion").click(process_frame, webcam, [webcam, output])
-        gr.Button("Reset").click(reset_env, None, [webcam, output])
+        gr.Button("▶️ Step").click(
+            process_step, webcam, [webcam, output, step_display, reward_display]
+        )
+        gr.Button("🔄 Reset").click(
+            reset_env, None, [webcam, output, step_display, reward_display]
+        )
 
-# ==============================
-# Mount Gradio to FastAPI
-# ==============================
-app = gr.mount_gradio_app(app, demo, path="/")
-
-# ==============================
-# Run Server
-# ==============================
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False)
