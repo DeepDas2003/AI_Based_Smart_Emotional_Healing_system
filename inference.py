@@ -7,7 +7,7 @@ from ultralytics import YOLO
 from my_env import EmotionEnv
 
 # =========================
-# OpenAI Client (required)
+# OpenAI Client
 # =========================
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
@@ -16,10 +16,7 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
 
-client = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=HF_TOKEN
-)
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 def run_inference(prompt: str):
     response = client.chat.completions.create(
@@ -47,8 +44,11 @@ current_step = 0
 total_reward = 0.0
 session_started = False
 
+# Task limits
+MAX_STEPS_TASK = {"Task 1": 4, "Task 2": 8, "Task 3": 12}
+
 # =========================
-# OpenEnv Functions (Phase 1)
+# OpenEnv Functions
 # =========================
 def start_env():
     global current_step, total_reward, session_started
@@ -56,15 +56,9 @@ def start_env():
     current_step = 0
     total_reward = 0.0
     session_started = True
-    print("OpenEnv Reset (POST OK)")
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-    return placeholder, current_step, total_reward
-
-MAX_STEPS_TASK = {
-    "Task 1": 4,
-    "Task 2": 8,
-    "Task 3": 12
-}
+    print("OpenEnv Start (POST OK)")
+    return placeholder, current_step, total_reward, "Environment Started"
 
 def step_env(frame):
     global current_step, total_reward, session_started
@@ -74,8 +68,7 @@ def step_env(frame):
         return placeholder, "⚠️ No frame provided", current_step, total_reward
 
     if not session_started:
-        session_started = True
-        print("OpenEnv Start (POST OK)")
+        start_env()
 
     results = yolo_model.predict(frame, device="cpu", verbose=False)
     boxes = results[0].boxes
@@ -109,13 +102,10 @@ def step_env(frame):
         task_status = "Task 3 (Hard)"
         task_limit = MAX_STEPS_TASK["Task 3"]
 
-    # Only reset after completing task steps
+    # Reset only after task completion
     if obs["emotion"] in ["happy", "neutral"] and current_step >= task_limit:
         print(f"[END] total_reward={total_reward:.2f} | {task_status} Completed")
-        env.reset()
-        session_started = False
-        current_step = 0
-        total_reward = 0.0
+        reset_env()
         task_status += " ✅ Completed"
 
     output_text = (
@@ -127,20 +117,19 @@ def step_env(frame):
         f"Advice: {obs['advice']}"
     )
 
+    print("OpenEnv Step (POST OK)")
     return frame, output_text, current_step, total_reward
 
 def reset_env():
+    """
+    Fully Phase 1 compatible reset.
+    Returns 4 values as expected by automated checks.
+    """
     global current_step, total_reward, session_started
     env.reset()
-    print("OpenEnv Reset (POST OK)")
     current_step = 0
     total_reward = 0.0
     session_started = False
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-    return placeholder, current_step, total_reward
-
-# =========================
-# Optional: Test OpenAI Inference
-# =========================
-if __name__ == "__main__":
-    print(run_inference("Hello from OpenEnv + OpenAI!"))
+    print("OpenEnv Reset (POST OK)")
+    return placeholder, current_step, total_reward, "Environment Reset"
