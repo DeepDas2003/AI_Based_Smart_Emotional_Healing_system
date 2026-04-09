@@ -1,15 +1,9 @@
-import numpy as np
 import gradio as gr
+import numpy as np
 from inference import start_env, step_env, reset_env
 
-# =========================
-# Initialize session
-# =========================
 frame_placeholder, current_step, total_reward, _ = start_env()
 
-# =========================
-# Process Step from Gradio
-# =========================
 def process_step(frame):
     global frame_placeholder, current_step, total_reward
 
@@ -17,36 +11,29 @@ def process_step(frame):
         placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
         return placeholder, "⚠️ Please capture image from webcam", current_step, total_reward
 
-    frame_out, output_text, current_step, total_reward = step_env(frame)
+    frame_out, obs, current_step, total_reward = step_env(frame)
 
-    # Display text for Gradio
-    if isinstance(output_text, dict):
-        obs = output_text
+    if isinstance(obs, dict):
         text_display = (
             f"Step: {current_step}\n"
-            f"Emotion: {obs['emotion']} | Confidence: {obs['confidence']:.2f}\n"
-            f"Reward this step: {obs['reward']:.2f}\n"
+            f"Emotion: {obs.get('emotion','unknown')} | Confidence: {obs.get('confidence',0.0):.2f}\n"
+            f"Reward this step: {obs.get('reward',0.0):.2f}\n"
             f"Total Reward: {total_reward:.2f}\n"
-            f"Advice: {obs['advice']}"
+            f"Advice: {obs.get('advice','')}\n"
+            f"Task Status: {obs.get('task_status','')}"
         )
     else:
-        text_display = str(output_text)
+        text_display = str(obs)
 
     return frame_out, text_display, current_step, total_reward
 
-# =========================
-# Reset Environment
-# =========================
 def reset_ui():
     global frame_placeholder, current_step, total_reward
     frame_placeholder, current_step, total_reward, message = reset_env()
     return frame_placeholder, message, current_step, total_reward
 
-# =========================
-# Gradio UI
-# =========================
 with gr.Blocks() as demo:
-    gr.Markdown("## 🎥 Emotion Detection (Phase 1 Logs Stdout)")
+    gr.Markdown("## 🎥 Emotion Detection (Episode Mode)")
 
     webcam = gr.Image(sources=["webcam"], type="numpy")
     output = gr.Textbox(lines=12, label="Step Info")
@@ -62,3 +49,4 @@ with gr.Blocks() as demo:
         )
 
 demo.launch(server_name="0.0.0.0", server_port=7860)
+
