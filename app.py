@@ -1,5 +1,5 @@
-# app_openenv_manual.py
 import cv2
+import numpy as np
 from PIL import Image
 import gradio as gr
 from ultralytics import YOLO
@@ -24,14 +24,20 @@ current_step = 0
 total_reward = 0.0
 session_started = False
 
+# Reset at startup
+env.reset()
+print("OpenEnv Reset (POST OK)")
+
 # =========================
 # Step Processor
 # =========================
 def process_step(frame):
     global current_step, total_reward, session_started
 
+    # Placeholder if frame is None
     if frame is None:
-        return None, "⚠️ Please capture image from webcam", current_step, total_reward
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        return placeholder, "⚠️ Please capture image from webcam", current_step, total_reward
 
     if not session_started:
         print("OpenEnv Start (POST OK)")
@@ -59,7 +65,7 @@ def process_step(frame):
     print(f"[STEP] step={current_step} emotion={obs['emotion']} reward={reward:.2f} total_reward={total_reward:.2f}")
     print("OpenEnv Step (POST OK)")
 
-    # Draw box
+    # Draw box on frame
     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
     task_status = ""
@@ -100,7 +106,8 @@ def reset_env():
     current_step = 0
     total_reward = 0.0
     session_started = False
-    return None, "Environment Reset", current_step, total_reward
+    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)  # black image placeholder
+    return placeholder, "Environment Reset", current_step, total_reward
 
 # =========================
 # Gradio UI
