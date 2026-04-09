@@ -42,70 +42,111 @@ def get_best_box(boxes):
 env = EmotionEnv()
 current_step = 0
 total_reward = 0.0
+reward_list = []
 session_started = False
 
 # Task limits
 MAX_STEPS_TASK = {"Task 1": 4, "Task 2": 8, "Task 3": 12}
 
 # =========================
-# OpenEnv Functions
+# Start Env
 # =========================
 def start_env():
-    global current_step, total_reward, session_started
+    global current_step, total_reward, session_started, reward_list
     env.reset()
     current_step = 0
     total_reward = 0.0
+    reward_list = []
     session_started = True
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-    print("OpenEnv Start (POST OK)")
+
+    print(f"[START] task=emotion-support env=openenv model={MODEL_NAME}")
     return placeholder, current_step, total_reward, "Environment Started"
 
+# =========================
+# Step Env
+# =========================
 def step_env(frame):
-    global current_step, total_reward, session_started
+    global current_step, total_reward, session_started, reward_list
+
+    error_msg = "null"
+    done = False
 
     if frame is None:
         placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-        return placeholder, "⚠️ No frame provided", current_step, total_reward
+        error_msg = "No frame provided"
+        print(f"[STEP] step={current_step+1} action=process_frame() reward=0.00 done={str(done).lower()} error={error_msg}")
+        return placeholder, error_msg, current_step, total_reward
 
     if not session_started:
         start_env()
 
-    results = yolo_model.predict(frame, device="cpu", verbose=False)
-    boxes = results[0].boxes
-    best_box = get_best_box(boxes)
+    try:
+        results = yolo_model.predict(frame, device="cpu", verbose=False)
+        boxes = results[0].boxes
+        best_box = get_best_box(boxes)
 
-    if best_box is None:
-        return frame, "❌ No face detected", current_step, total_reward
+        if best_box is None:
+            error_msg = "No face detected"
+            print(f"[STEP] step={current_step+1} action=detect_face() reward=0.00 done={str(done).lower()} error={error_msg}")
+            return frame, error_msg, current_step, total_reward
 
-    x1, y1, x2, y2 = best_box
-    face = frame[y1:y2, x1:x2]
-    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
-    face_pil = Image.fromarray(gray)
+        x1, y1, x2, y2 = best_box
+        face = frame[y1:y2, x1:x2]
+        gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+        face_pil = Image.fromarray(gray)
 
-    result = env.step(face_pil)
-    obs = result["obs"]
-    reward = result["reward"]
-    current_step = obs["steps"]
-    total_reward = result["total_reward"]
+        result = env.step(face_pil)
+        obs = result["obs"]
+        reward = result["reward"]
+        current_step = obs["steps"]
+        total_reward = result["total_reward"]
+        reward_list.append(reward)
 
-    # Draw bounding box
-    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        # Draw bounding box
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-    # Determine current task
-    if current_step <= MAX_STEPS_TASK["Task 1"]:
-        task_status = "Task 1 (Easy)"
-        task_limit = MAX_STEPS_TASK["Task 1"]
-    elif current_step <= MAX_STEPS_TASK["Task 2"]:
-        task_status = "Task 2 (Medium)"
-        task_limit = MAX_STEPS_TASK["Task 2"]
-    else:
-        task_status = "Task 3 (Hard)"
-        task_limit = MAX_STEPS_TASK["Task 3"]
+        # Determine task
+        if current_step <= MAX_STEPS_TASK["Task 1"]:
+            task_limit = MAX_STEPS_TASK["Task 1"]
+        elif current_step <= MAX_STEPS_TASK["Task 2"]:
+            task_limit = MAX_STEPS_TASK["Task 2"]
+        else:
+            task_limit = MAX_STEPS_TASK["Task 3"]
 
-    # Reset only after task completion
-    if obs["emotion"] in ["happy", "neutral"] and current_step >= task_limit:
-        print(f"[END] total_reward={total_reward:.2f} | {task_status} Completed")
-        reset_env()
+        # Check if task done
+        if obs["emotion"] in ["happy", "neutral"] and current_step >= task_limit:
+            done = True
+            print(f"[STEP] step={current_step} action=analyze_emotion() reward={reward:.2f} done={str(done).lower()} error=null")
+            reset_env()
+            return frame, obs, current_step, total_reward
+
+        # Regular step
+        print(f"[STEP] step={current_step} action=analyze_emotion() reward={reward:.2f} done={str(done).lower()} error=null")
+        return frame, obs, current_step, total_reward
+
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[STEP] step={current_step+1} action=process_frame() reward=0.00 done={str(done).lower()} error={error_msg}")
+        return frame, error_msg, current_step, total_reward
+
+# =========================
+# Reset Env
+# =========================
+def reset_env():
+    global current_step, total_reward, session_started, reward_list
+    env.reset()
+    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+    session_started = False
+    steps_done = current_step
+    total_r = total_reward
+    reward_list_to_print = ",".join([f"{r:.2f}" for r in reward_list]) if reward_list else "0.00"
+    current_step = 0
+    total_reward = 0.0
+    reward_list = []
+
+    print(f"[END] success=true steps={steps_done} rewards={reward_list_to_print}")
+    return placeholder, current_step, total_reward, "Environment Reset"
         task_status += " ✅ Completed"
 
     output_text = (
