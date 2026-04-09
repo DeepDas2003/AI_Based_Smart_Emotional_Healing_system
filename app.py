@@ -4,16 +4,36 @@ import numpy as np
 
 frame_placeholder, current_step, total_reward, _ = start_env()
 
+# Global to track first success step
+first_success_step = None
+
 def process_step():
     """Run next step using random image from folder."""
-    global frame_placeholder, current_step, total_reward
+    global frame_placeholder, current_step, total_reward, first_success_step
     frame_out, obs, current_step, total_reward = step_env()
 
-    if isinstance(obs, dict):
-        task_status = obs.get('task_status', '')
-        # If task_status is empty, show placeholder like "In Progress"
-        task_status = task_status if task_status else "In Progress"
+    task_status = "In Progress"
 
+    # If first happy/neutral detected, mark task
+    if obs["emotion"] in ["happy", "neutral"] and first_success_step is None:
+        first_success_step = current_step
+        if first_success_step <= 4:
+            task_status = "Task 1 (Easy) Completed"
+        elif first_success_step <= 8:
+            task_status = "Task 2 (Medium) Completed"
+        else:
+            task_status = "Task 3 (Hard) Completed"
+    elif first_success_step is not None:
+        # Already completed task
+        if first_success_step <= 4:
+            task_status = "Task 1 (Easy) Completed"
+        elif first_success_step <= 8:
+            task_status = "Task 2 (Medium) Completed"
+        else:
+            task_status = "Task 3 (Hard) Completed"
+
+    # Display info in UI
+    if isinstance(obs, dict):
         text_display = (
             f"Step: {current_step}\n"
             f"Emotion: {obs.get('emotion','unknown')} | Confidence: {obs.get('confidence',0.0):.2f}\n"
@@ -24,6 +44,10 @@ def process_step():
         )
     else:
         text_display = str(obs)
+
+    # If episode ends (happy/neutral reached or max steps), reset first_success_step
+    if obs["emotion"] in ["happy","neutral"] or current_step >= 12:
+        first_success_step = None
 
     return frame_out, text_display, current_step, total_reward
 
@@ -49,4 +73,3 @@ with gr.Blocks() as demo:
         )
 
 demo.launch(server_name="0.0.0.0", server_port=7860)
-
