@@ -18,6 +18,13 @@ Overall, this environment represents a step towards empathetic AI, where technol
 
 
 
+<img width="413" height="157" alt="Screenshot 2026-04-09 121129" src="https://github.com/user-attachments/assets/4dfea092-f8e8-4ca4-a1e0-9a0ceb825281" />
+if it detects positive type emotions state at first time only , reward score is 0.5
+if it detects negative type emotions at previous state then positive type at current state then reward score becomes 1.0
+if it detects negative type emotions at previous state then neutral at current state then reward score becomes 0.8
+if no improvement in negative type emotions then no reward
+if emotional state jumps from positive to negative then also no reward
+
 
 ***Definitions of action and observation spaces***
 
