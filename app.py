@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import gradio as gr
+import requests
 from ultralytics import YOLO
 from my_env import EmotionEnv
 
@@ -24,9 +25,22 @@ current_step = 0
 total_reward = 0.0
 session_started = False
 
-# Reset at startup
-env.reset()
-print("OpenEnv Reset (POST OK)")
+# =========================
+# OpenEnv POST Reset Wrapper
+# =========================
+def openenv_reset():
+    global env
+    try:
+        response = requests.post("http://localhost:5000/reset")  # HF Phase 1 expects POST
+        if response.status_code == 200:
+            print("OpenEnv Reset (POST OK)")
+        else:
+            print(f"OpenEnv Reset Failed (status {response.status_code})")
+    except Exception as e:
+        print(f"OpenEnv Reset Exception: {e}")
+
+# Reset environment at startup
+openenv_reset()
 
 # =========================
 # Step Processor
@@ -79,8 +93,7 @@ def process_step(frame):
             task_status = "Task 3 (Hard) Completed"
 
         print(f"[END] total_reward={total_reward:.2f} | {task_status}")
-        env.reset()
-        print("OpenEnv Reset (POST OK)")
+        openenv_reset()
         session_started = False
         current_step = 0
         total_reward = 0.0
@@ -101,12 +114,11 @@ def process_step(frame):
 # =========================
 def reset_env():
     global current_step, total_reward, session_started
-    env.reset()
-    print("OpenEnv Reset (POST OK)")
+    openenv_reset()
     current_step = 0
     total_reward = 0.0
     session_started = False
-    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)  # black image placeholder
+    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)  # black image
     return placeholder, "Environment Reset", current_step, total_reward
 
 # =========================
