@@ -62,6 +62,7 @@ My cnn model's confusion matrix
 For cloning git ling in terminal
 
 git clone https://github.com/DeepDas2003/AI_Based_Smart_Emotional_Healing_system
+
 cd AI_Based_Smart_Emotional_Healing_system
 
 *Setup*
@@ -75,9 +76,77 @@ Set the following environment variables:
 - MODEL_NAME
 - HF_TOKEN
 
-running
+*run the application in docker*
 
-python app.py
+uvicorn inference:app --host 0.0.0.0 --port 7860 . 
+
+docker run -p 7860:7860 emotion-ai
+
+*open in browser*
+
+http://localhost:7860/
+
+*🚀 Usage Guide*
+
+
+### 🔹 1. Start the System
+
+* Open the web interface in your browser
+* Allow webcam access when prompted
+
+### 🔹 2. Automatic Emotion Detection
+
+* The system captures an image **every 15 seconds automatically**
+* No manual input is required
+
+### 🔹 3. Real-Time Feedback
+
+For each step, the UI displays:
+
+* Detected **Emotion**
+* **Confidence Score**
+* **Reward (per step)**
+* **Total Reward**
+* **Emotional Advice**
+
+### 🔹 4. Task Completion Logic
+
+The session automatically ends when:
+
+* A **positive emotion (happy/neutral)** is detected
+* OR **maximum 12 steps** are reached
+
+### 🔹 5. Task Difficulty Classification (UI Only)
+
+Based on completion speed:
+
+* **≤ 4 steps → Task 1 (Easy)**
+* **≤ 8 steps → Task 2 (Moderate)**
+* **≤ 12 steps → Task 3 (Hard)**
+
+### 🔹 6. Automatic Reset
+
+* After completion, the system **resets automatically**
+* A new session starts without user intervention
+
+### 🔹 7. API Endpoints (Evaluator)
+
+* `POST /reset` → Initialize environment
+* `POST /step` → Process image frame
+* `GET /grade/task_easy` → Get evaluation score
+
+### 🔹 8. Logging Format
+
+The system prints evaluator-compatible logs:
+
+```
+[START] task=emotion-support
+[STEP] step=1 reward=0.50 done=false
+[END] task=emotion-support score=0.75 steps=3
+```
+
+
+
 
 ***Baseline Performance***
 
