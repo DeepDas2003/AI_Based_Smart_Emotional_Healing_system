@@ -1,117 +1,162 @@
-import os
-import random
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+import base64
 import numpy as np
+import cv2
 from PIL import Image
 from ultralytics import YOLO
+
 from my_env import EmotionEnv
+from grader import grade
 
 # =========================
-# Model + Env
+# INIT
 # =========================
+app = FastAPI()
+
 YOLO_PATH = "yolov8n-face-lindevs.pt"
 yolo_model = YOLO(YOLO_PATH)
+
 env = EmotionEnv()
-MAX_EPISODE_STEPS = 12
+
+MAX_STEPS = 12
+task_id_global = "emotion-support"
 
 # =========================
-# Images Folder
+# REQUEST MODELS
 # =========================
-IMAGE_FOLDER = "./emotional_faces/"
-image_files = [os.path.join(IMAGE_FOLDER, f) for f in os.listdir(IMAGE_FOLDER)
-               if f.lower().endswith((".png",".jpg",".jpeg"))]
-if not image_files:
-    raise ValueError(f"No images found in {IMAGE_FOLDER}")
+class ResetRequest(BaseModel):
+    task_id: str
+    seed: int = 42
+
+class StepRequest(BaseModel):
+    image: str  # base64
 
 # =========================
-# Session State
+# UTILS
 # =========================
-current_step = 0
-total_reward = 0.0
-reward_list = []
-session_started = False
+def decode_base64(image_str):
+    img_data = base64.b64decode(image_str.split(",")[1])
+    np_arr = np.frombuffer(img_data, np.uint8)
+    return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-# =========================
-# Utility
-# =========================
 def get_best_box(boxes):
     if boxes is None or len(boxes) == 0:
         return None
     return tuple(map(int, boxes[0].xyxy[0]))
 
-def start_env():
-    global current_step, total_reward, reward_list, session_started
+# =========================
+# ROOT → UI
+# =========================
+@app.get("/")
+def home():
+    return FileResponse("index.html")
+
+# =========================
+# RESET
+# =========================
+@app.post("/reset")
+def reset(req: ResetRequest):
+    global task_id_global
+
     env.reset()
-    current_step = 0
-    total_reward = 0.0
-    reward_list = []
-    session_started = True
-    print(f"[START] task=emotion-support env=openenv model=gpt-4.1-mini")
-    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-    return placeholder, current_step, total_reward, "Environment Started"
+    task_id_global = req.task_id
 
-def step_env():
-    """Pick a random image from folder and run a step."""
-    global current_step, total_reward, reward_list, session_started
+    print(f"[START] task={task_id_global}", flush=True)
 
-    if not session_started:
-        start_env()
+    return {
+        "task_id": task_id_global,
+        "observation": "environment reset"
+    }
 
-    error_msg = "null"
-    done = False
+# =========================
+# STEP
+# =========================
+@app.post("/step")
+def step(req: StepRequest):
+    global task_id_global
 
     try:
-        # Pick random image
-        img_path = random.choice(image_files)
-        frame = np.array(Image.open(img_path).convert("RGB"))
+        frame = decode_base64(req.image)
 
         results = yolo_model.predict(frame, device="cpu", verbose=False)
         boxes = results[0].boxes
-        best_box = get_best_box(boxes)
+        box = get_best_box(boxes)
 
-        if best_box is None:
-            print(f"[STEP] step={current_step+1} action=detect_face() reward=0.00 done={str(done).lower()} error=No face detected")
-            return frame, "No face detected", current_step, total_reward
+        if box is None:
+            return {
+                "observation": {"emotion": "no_face"},
+                "reward": 0.0,
+                "done": False,
+                "task_status": "In Progress",
+                "steps": env.steps,
+                "total_reward": env.total_reward
+            }
 
-        x1, y1, x2, y2 = best_box
+        x1, y1, x2, y2 = box
         face = frame[y1:y2, x1:x2]
-        face_pil = Image.fromarray(face)
 
-        # Env step
-        result = env.step(face_pil)
+        result = env.step(Image.fromarray(face))
+
         obs = result["obs"]
         reward = result["reward"]
-        current_step = obs["steps"]
-        total_reward = result["total_reward"]
-        reward_list.append(reward)
 
-        # Draw face box
-        import cv2
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        done = (
+            obs["emotion"] in ["happy", "neutral"] or
+            obs["steps"] >= MAX_STEPS
+        )
 
-        # Check if episode ends
-        if obs["emotion"] in ["happy", "neutral"] or current_step >= MAX_EPISODE_STEPS:
-            done = True
+        print(
+            f"[STEP] step={obs['steps']} reward={reward:.2f} done={done}",
+            flush=True
+        )
 
-        print(f"[STEP] step={current_step} action=analyze_emotion() reward={reward:.2f} done={str(done).lower()} error=null")
+        # 🎯 TASK STATUS (UI ONLY)
+        task_status = "In Progress"
 
         if done:
-            rewards_str = ",".join([f"{r:.2f}" for r in reward_list])
-            success_flag = "true" if obs["emotion"] in ["happy","neutral"] else "false"
-            print(f"[END] success={success_flag} steps={current_step} rewards={rewards_str}")
-            reset_env()
+            steps = obs["steps"]
 
-        return frame, obs, current_step, total_reward
+            if steps <= 4:
+                task_status = "Task 1 (Easy)"
+            elif steps <= 8:
+                task_status = "Task 2 (Moderate)"
+            else:
+                task_status = "Task 3 (Hard)"
+
+            # ✅ REQUIRED FORMAT
+            print(
+                f"[END] task={task_id_global} score={result['total_reward']:.2f} steps={steps}",
+                flush=True
+            )
+
+            # 🔥 AUTO RESET
+            env.reset()
+
+        return {
+            "observation": obs,
+            "reward": reward,
+            "done": done,
+            "task_status": task_status,
+            "steps": obs["steps"],
+            "total_reward": result["total_reward"]
+        }
 
     except Exception as e:
-        print(f"[STEP] step={current_step+1} action=process_frame() reward=0.00 done={str(done).lower()} error={str(e)}")
-        return frame, str(e), current_step, total_reward
+        return {
+            "observation": {"error": str(e)},
+            "reward": 0.0,
+            "done": False,
+            "task_status": "Error",
+            "steps": env.steps,
+            "total_reward": env.total_reward
+        }
 
-def reset_env():
-    global current_step, total_reward, reward_list, session_started
-    env.reset()
-    current_step = 0
-    total_reward = 0.0
-    reward_list = []
-    session_started = False
-    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-    return placeholder, current_step, total_reward, "Environment Reset"
+# =========================
+# GRADE
+# =========================
+@app.get("/grade/task_easy")
+def grade_easy():
+    score = grade(env.history, env.emotion, env.total_reward)
+    return {"score": score, "reward": env.total_reward}
