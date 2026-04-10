@@ -34,10 +34,11 @@ if emotional state jumps from positive to negative then also no reward
 | Observation         | Dictionary            | Contains predicted emotion, confidence score, image metadata, and step info.        |
 | Reward              | float                 | Numerical feedback based on action effectiveness (e.g., correct emotion detection). |
 | Episode Termination | Boolean               | Signals the end of a session after MAX_STEPS or achieving success criteria.         |
-<img width="1551" height="773" alt="image" src="https://github.com/user-attachments/assets/15f99ef1-4323-4b91-9a47-b09033718dbd" />
+<img width="833" height="710" alt="Screenshot 2026-04-10 174606" src="https://github.com/user-attachments/assets/3e7a1979-d478-4fe0-8efa-f93e6d0923b6" />
 
 
-<img width="1532" height="744" alt="image" src="https://github.com/user-attachments/assets/20c6a8bb-9bfa-4ad7-a971-17789f432a83" />
+<img width="721" height="724" alt="Screenshot 2026-04-10 174624" src="https://github.com/user-attachments/assets/62cb9b9f-7c84-404d-9721-ff32800fc073" />
+
 
 ***Task descriptions with expected difficulty levels***
 
