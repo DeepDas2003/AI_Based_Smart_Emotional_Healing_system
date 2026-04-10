@@ -59,6 +59,17 @@ class EmotionResNet(nn.Module):
             nn.Linear(256, num_classes)
         )
 
+        # ✅ ADD THIS
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
     def forward(self, x):
         x = self.relu(self.bn(self.conv(x)))
         x = self.layer1(x)
