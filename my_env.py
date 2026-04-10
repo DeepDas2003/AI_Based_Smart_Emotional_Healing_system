@@ -77,9 +77,7 @@ class EmotionEnv:
             "task_status": task_status
         }
 
-        if done:
-            self.reset()
-
+        # DO NOT reset here — HF needs to see final step
         return result
 
     def _compute_reward(self, prev, curr):
