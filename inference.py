@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import base64
+import os
 import numpy as np
 import cv2
 from PIL import Image
@@ -9,6 +10,17 @@ from ultralytics import YOLO
 
 from my_env import EmotionEnv
 from grader import grade
+
+# =========================
+# ENV VARIABLES (REQUIRED)
+# =========================
+API_BASE_URL = os.getenv("API_BASE_URL", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "")
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+
+# (Optional placeholder for OpenAI client usage)
+# from openai import OpenAI
+# client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 # =========================
 # INIT
@@ -31,7 +43,7 @@ class ResetRequest(BaseModel):
     seed: int = 42
 
 class StepRequest(BaseModel):
-    image: str  # base64
+    image: str  # base64 image
 
 # =========================
 # UTILS
@@ -85,6 +97,10 @@ def step(req: StepRequest):
         box = get_best_box(boxes)
 
         if box is None:
+            print(
+                f"[STEP] task={task_id_global} step={env.steps+1} action=detect_face reward=0.00 done=false error=no_face",
+                flush=True
+            )
             return {
                 "observation": {"emotion": "no_face"},
                 "reward": 0.0,
@@ -107,12 +123,13 @@ def step(req: StepRequest):
             obs["steps"] >= MAX_STEPS
         )
 
+        # ✅ STRICT STEP FORMAT
         print(
-            f"[STEP] step={obs['steps']} reward={reward:.2f} done={done}",
+            f"[STEP] task={task_id_global} step={obs['steps']} action=emotion_analysis reward={reward:.2f} done={str(done).lower()} error=null",
             flush=True
         )
 
-        # 🎯 TASK STATUS (UI ONLY)
+        # UI TASK STATUS
         task_status = "In Progress"
 
         if done:
@@ -125,13 +142,13 @@ def step(req: StepRequest):
             else:
                 task_status = "Task 3 (Hard)"
 
-            # ✅ REQUIRED FORMAT
+            # ✅ STRICT END FORMAT
             print(
                 f"[END] task={task_id_global} score={result['total_reward']:.2f} steps={steps}",
                 flush=True
             )
 
-            # 🔥 AUTO RESET
+            # AUTO RESET
             env.reset()
 
         return {
@@ -144,6 +161,11 @@ def step(req: StepRequest):
         }
 
     except Exception as e:
+        print(
+            f"[STEP] task={task_id_global} step={env.steps+1} action=error reward=0.00 done=false error={str(e)}",
+            flush=True
+        )
+
         return {
             "observation": {"error": str(e)},
             "reward": 0.0,
