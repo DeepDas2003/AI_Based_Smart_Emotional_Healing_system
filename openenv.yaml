@@ -1,6 +1,6 @@
-name: emotion-support
+name: AI SMART EMOTIONAL HEALING SYSTEM
 env: emotion-v1
-entrypoint: inference.py
+entrypoint: server.app:main
 
 max_steps: 12
 
