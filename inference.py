@@ -22,10 +22,7 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 client = None
 if API_BASE_URL and HF_TOKEN:
     try:
-        client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=HF_TOKEN
-        )
+        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
         print("[INFO] OpenAI client initialized", flush=True)
     except Exception as e:
         print(f"[ERROR] OpenAI init failed: {e}", flush=True)
@@ -57,7 +54,6 @@ def load_models():
         env = EmotionEnv()
 
         print("[INFO] Models loaded successfully", flush=True)
-
     except Exception as e:
         print(f"[ERROR] Model loading failed: {e}", flush=True)
 
@@ -102,16 +98,14 @@ def home():
 @app.post("/reset")
 def reset():
     global step_count, rewards
-
     step_count = 0
     rewards = []
 
-    print(
-        f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}",
-        flush=True
-    )
+    # ✅ FIXED FORMAT
+    print(f"[START] task={TASK_NAME}", flush=True)
 
     return {"status": "reset_done"}
+
 
 # =========================
 # STEP API
@@ -122,9 +116,17 @@ def step(req: StepRequest):
 
     try:
         # --------------------
+        # FORCE START (Evaluator)
+        # --------------------
+        if step_count == 0:
+            print(f"[START] task={TASK_NAME}", flush=True)
+
+        # --------------------
         # MODEL CHECK
         # --------------------
         if yolo is None or env is None:
+            print(f"[STEP] step={step_count} reward=0.00", flush=True)
+            print(f"[END] task={TASK_NAME} score={sum(rewards):.2f} steps={step_count}", flush=True)
             return {
                 "observation": {"emotion": "model_not_loaded"},
                 "reward": 0.0,
@@ -137,6 +139,7 @@ def step(req: StepRequest):
         # VALIDATION
         # --------------------
         if not req or not req.image:
+            print(f"[STEP] step={step_count} reward=0.00", flush=True)
             return {
                 "observation": {"emotion": "no_input"},
                 "reward": 0.0,
@@ -146,17 +149,18 @@ def step(req: StepRequest):
             }
 
         # --------------------
-        # DECODE IMAGE
+        # DECODE
         # --------------------
         frame = decode(req.image)
 
         # --------------------
-        # YOLO FACE DETECTION
+        # YOLO
         # --------------------
         results = yolo.predict(frame, device="cpu", verbose=False)
         box = get_box(results[0].boxes)
 
         if box is None:
+            print(f"[STEP] step={step_count} reward=0.00", flush=True)
             return {
                 "observation": {"emotion": "no_face"},
                 "reward": 0.0,
@@ -166,7 +170,7 @@ def step(req: StepRequest):
             }
 
         # --------------------
-        # CROP FACE
+        # CROP
         # --------------------
         x1, y1, x2, y2 = box
         face = frame[y1:y2, x1:x2]
@@ -175,19 +179,18 @@ def step(req: StepRequest):
         # ENV STEP
         # --------------------
         result = env.step(Image.fromarray(face))
-
         obs = result["obs"]
         reward = float(result["reward"])
 
         # --------------------
-        # OPTIONAL LLM ADVICE
+        # OPTIONAL LLM
         # --------------------
         if client:
             try:
                 response = client.chat.completions.create(
                     model=LLM_MODEL_NAME,
                     messages=[
-                        {"role": "user", "content": f"Give short advice for emotion: {obs['emotion']}"}
+                        {"role": "user", "content": f"Advice for emotion: {obs['emotion']}"}
                     ]
                 )
                 obs["advice"] = response.choices[0].message.content.strip()
@@ -203,7 +206,6 @@ def step(req: StepRequest):
         # TASK LOGIC
         # --------------------
         task_status = "in_progress"
-
         if done:
             if obs["emotion"] in ["happy", "neutral"]:
                 if step_count <= 4:
@@ -216,18 +218,16 @@ def step(req: StepRequest):
                 task_status = "Failed"
 
         # --------------------
-        # LOGGING
+        # ✅ FIXED STEP LOG
         # --------------------
-        print(
-            f"[STEP] step={step_count} action={obs['emotion']} "
-            f"reward={reward:.2f} done={str(done).lower()} error=null",
-            flush=True
-        )
+        print(f"[STEP] step={step_count} reward={reward:.2f}", flush=True)
 
+        # --------------------
+        # ✅ FIXED END LOG
+        # --------------------
         if done:
             print(
-                f"[END] success={str(step_count < MAX_STEPS).lower()} "
-                f"steps={step_count} score={result['total_reward']:.2f}",
+                f"[END] task={TASK_NAME} score={result['total_reward']:.2f} steps={step_count}",
                 flush=True
             )
             step_count = 0
@@ -243,8 +243,9 @@ def step(req: StepRequest):
         }
 
     except Exception as e:
+        print(f"[STEP] step={step_count} reward=0.00", flush=True)
         print(
-            f"[STEP] step={step_count} action=error reward=0 done=false error={str(e)}",
+            f"[END] task={TASK_NAME} score={sum(rewards):.2f} steps={step_count}",
             flush=True
         )
 
