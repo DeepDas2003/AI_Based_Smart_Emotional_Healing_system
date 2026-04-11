@@ -10,6 +10,26 @@ from PIL import Image
 from ultralytics import YOLO
 
 from my_env import EmotionEnv
+from openai import OpenAI
+
+# =========================
+# ENV VARIABLES (LLM)
+# =========================
+API_BASE_URL = os.getenv("API_BASE_URL", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+
+# Initialize client (safe)
+client = None
+if API_BASE_URL and HF_TOKEN:
+    try:
+        client = OpenAI(
+            base_url=API_BASE_URL,
+            api_key=HF_TOKEN
+        )
+        print("[INFO] OpenAI client initialized", flush=True)
+    except Exception as e:
+        print(f"[ERROR] OpenAI init failed: {e}", flush=True)
 
 # =========================
 # CONFIG
