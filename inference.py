@@ -32,7 +32,6 @@ if API_BASE_URL and HF_TOKEN:
 # =========================
 MODEL_NAME = "emotion-model"
 TASK_NAME = "emotion-support"
-BENCHMARK = "emotion-v1"
 MAX_STEPS = 12
 
 # =========================
@@ -100,12 +99,8 @@ def reset():
     global step_count, rewards
     step_count = 0
     rewards = []
-
-    # ✅ FIXED FORMAT
     print(f"[START] task={TASK_NAME}", flush=True)
-
     return {"status": "reset_done"}
-
 
 # =========================
 # STEP API
@@ -115,9 +110,7 @@ def step(req: StepRequest):
     global step_count, rewards
 
     try:
-        # --------------------
-        # FORCE START (Evaluator)
-        # --------------------
+        # ✅ FORCE START (important for evaluator)
         if step_count == 0:
             print(f"[START] task={TASK_NAME}", flush=True)
 
@@ -149,13 +142,9 @@ def step(req: StepRequest):
             }
 
         # --------------------
-        # DECODE
+        # PROCESS IMAGE
         # --------------------
         frame = decode(req.image)
-
-        # --------------------
-        # YOLO
-        # --------------------
         results = yolo.predict(frame, device="cpu", verbose=False)
         box = get_box(results[0].boxes)
 
@@ -169,15 +158,9 @@ def step(req: StepRequest):
                 "task": "in_progress"
             }
 
-        # --------------------
-        # CROP
-        # --------------------
         x1, y1, x2, y2 = box
         face = frame[y1:y2, x1:x2]
 
-        # --------------------
-        # ENV STEP
-        # --------------------
         result = env.step(Image.fromarray(face))
         obs = result["obs"]
         reward = float(result["reward"])
@@ -217,14 +200,10 @@ def step(req: StepRequest):
             else:
                 task_status = "Failed"
 
-        # --------------------
-        # ✅ FIXED STEP LOG
-        # --------------------
+        # ✅ STEP LOG (STRICT FORMAT)
         print(f"[STEP] step={step_count} reward={reward:.2f}", flush=True)
 
-        # --------------------
-        # ✅ FIXED END LOG
-        # --------------------
+        # ✅ END LOG (STRICT FORMAT)
         if done:
             print(
                 f"[END] task={TASK_NAME} score={result['total_reward']:.2f} steps={step_count}",
@@ -244,10 +223,7 @@ def step(req: StepRequest):
 
     except Exception as e:
         print(f"[STEP] step={step_count} reward=0.00", flush=True)
-        print(
-            f"[END] task={TASK_NAME} score={sum(rewards):.2f} steps={step_count}",
-            flush=True
-        )
+        print(f"[END] task={TASK_NAME} score={sum(rewards):.2f} steps={step_count}", flush=True)
 
         return {
             "observation": {"emotion": "error"},
