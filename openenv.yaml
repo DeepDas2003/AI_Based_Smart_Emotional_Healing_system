@@ -1,0 +1,8 @@
+name: emotion-support
+env: emotion-v1
+entrypoint: inference.py
+
+max_steps: 12
+
+# optional metadata
+description: Emotion detection RL-style environment using face emotion classification
