@@ -16,10 +16,9 @@ from openai import OpenAI
 # ENV VARIABLES (LLM)
 # =========================
 API_BASE_URL = os.getenv("API_BASE_URL", "")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+LLM_MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 
-# Initialize client (safe)
 client = None
 if API_BASE_URL and HF_TOKEN:
     try:
@@ -34,7 +33,7 @@ if API_BASE_URL and HF_TOKEN:
 # =========================
 # CONFIG
 # =========================
-MODEL_NAME = os.getenv("MODEL_NAME", "emotion-model")
+MODEL_NAME = "emotion-model"
 TASK_NAME = "emotion-support"
 BENCHMARK = "emotion-v1"
 MAX_STEPS = 12
@@ -44,8 +43,23 @@ MAX_STEPS = 12
 # =========================
 app = FastAPI()
 
-yolo = YOLO("yolov8n-face-lindevs.pt")
-env = EmotionEnv()
+yolo = None
+env = None
+
+@app.on_event("startup")
+def load_models():
+    global yolo, env
+    try:
+        yolo_path = os.path.join(os.getcwd(), "yolov8n-face-lindevs.pt")
+        print(f"[INFO] Loading YOLO from {yolo_path}", flush=True)
+
+        yolo = YOLO(yolo_path)
+        env = EmotionEnv()
+
+        print("[INFO] Models loaded successfully", flush=True)
+
+    except Exception as e:
+        print(f"[ERROR] Model loading failed: {e}", flush=True)
 
 # =========================
 # STATE
@@ -77,10 +91,13 @@ def get_box(boxes):
 # =========================
 @app.get("/")
 def home():
-    return FileResponse("index.html")
+    try:
+        return FileResponse("index.html")
+    except:
+        return {"status": "running"}
 
 # =========================
-# RESET (START EPISODE)
+# RESET
 # =========================
 @app.post("/reset")
 def reset():
@@ -105,6 +122,18 @@ def step(req: StepRequest):
 
     try:
         # --------------------
+        # MODEL CHECK
+        # --------------------
+        if yolo is None or env is None:
+            return {
+                "observation": {"emotion": "model_not_loaded"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False,
+                "task": "error"
+            }
+
+        # --------------------
         # VALIDATION
         # --------------------
         if not req or not req.image:
@@ -119,33 +148,13 @@ def step(req: StepRequest):
         # --------------------
         # DECODE IMAGE
         # --------------------
-        try:
-            frame = decode(req.image)
-        except Exception as e:
-            print(f"[ERROR] Decode failed: {e}", flush=True)
-            return {
-                "observation": {"emotion": "decode_error"},
-                "reward": 0.0,
-                "total_reward": sum(rewards),
-                "done": False,
-                "task": "in_progress"
-            }
+        frame = decode(req.image)
 
         # --------------------
         # YOLO FACE DETECTION
         # --------------------
-        try:
-            results = yolo.predict(frame, device="cpu", verbose=False)
-            box = get_box(results[0].boxes)
-        except Exception as e:
-            print(f"[ERROR] YOLO failed: {e}", flush=True)
-            return {
-                "observation": {"emotion": "yolo_error"},
-                "reward": 0.0,
-                "total_reward": sum(rewards),
-                "done": False,
-                "task": "in_progress"
-            }
+        results = yolo.predict(frame, device="cpu", verbose=False)
+        box = get_box(results[0].boxes)
 
         if box is None:
             return {
@@ -170,13 +179,28 @@ def step(req: StepRequest):
         obs = result["obs"]
         reward = float(result["reward"])
 
+        # --------------------
+        # OPTIONAL LLM ADVICE
+        # --------------------
+        if client:
+            try:
+                response = client.chat.completions.create(
+                    model=LLM_MODEL_NAME,
+                    messages=[
+                        {"role": "user", "content": f"Give short advice for emotion: {obs['emotion']}"}
+                    ]
+                )
+                obs["advice"] = response.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"[ERROR] LLM failed: {e}", flush=True)
+
         step_count += 1
         rewards.append(reward)
 
         done = obs["emotion"] in ["happy", "neutral"] or step_count >= MAX_STEPS
 
         # --------------------
-        # TASK LOGIC (✅ CORRECT PLACE)
+        # TASK LOGIC
         # --------------------
         task_status = "in_progress"
 
@@ -210,15 +234,12 @@ def step(req: StepRequest):
             rewards = []
             env.reset()
 
-        # --------------------
-        # FINAL RESPONSE
-        # --------------------
         return {
             "observation": obs,
             "reward": reward,
             "total_reward": result["total_reward"],
             "done": done,
-            "task": task_status   # ✅ FIXED
+            "task": task_status
         }
 
     except Exception as e:
