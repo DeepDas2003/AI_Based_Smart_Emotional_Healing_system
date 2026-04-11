@@ -85,24 +85,81 @@ def step(req: StepRequest):
 
     try:
         # --------------------
-        # YOUR LOGIC
+        # VALIDATION
         # --------------------
-
         if not req or not req.image:
-            return {...}
+            return {
+                "observation": {"emotion": "no_input"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False
+            }
 
-        frame = decode(req.image)
+        # --------------------
+        # DECODE IMAGE
+        # --------------------
+        try:
+            frame = decode(req.image)
+        except Exception as e:
+            print(f"[ERROR] Decode failed: {e}", flush=True)
+            return {
+                "observation": {"emotion": "decode_error"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False
+            }
 
-        results = yolo.predict(frame, device="cpu", verbose=False)
-        box = get_box(results[0].boxes)
+        # --------------------
+        # YOLO FACE DETECTION
+        # --------------------
+        try:
+            results = yolo.predict(frame, device="cpu", verbose=False)
+            box = get_box(results[0].boxes)
+        except Exception as e:
+            print(f"[ERROR] YOLO failed: {e}", flush=True)
+            return {
+                "observation": {"emotion": "yolo_error"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False
+            }
 
         if box is None:
-            return {...}
+            return {
+                "observation": {"emotion": "no_face"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False
+            }
 
-        x1, y1, x2, y2 = box
-        face = frame[y1:y2, x1:x2]
+        # --------------------
+        # CROP FACE
+        # --------------------
+        try:
+            x1, y1, x2, y2 = box
+            face = frame[y1:y2, x1:x2]
+        except Exception as e:
+            print(f"[ERROR] Crop failed: {e}", flush=True)
+            return {
+                "observation": {"emotion": "crop_error"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False
+            }
 
-        result = env.step(Image.fromarray(face))
+        # --------------------
+        # ENV STEP
+        # --------------------
+        try:
+            result = env.step(Image.fromarray(face))
+        except Exception as e:
+            print(f"[ERROR] Env step failed: {e}", flush=True)
+            return {
+                "observation": {"emotion": "env_error"},
+                "reward": 0.0,
+                "total_reward": sum(rewards),
+                "done": False
+            }
 
         obs = result["obs"]
         reward = float(result["reward"])
@@ -112,6 +169,9 @@ def step(req: StepRequest):
 
         done = obs["emotion"] in ["happy", "neutral"] or step_count >= MAX_STEPS
 
+        # --------------------
+        # LOGGING
+        # --------------------
         print(
             f"[STEP] step={step_count} action={obs['emotion']} "
             f"reward={reward:.2f} done={str(done).lower()} error=null",
@@ -130,7 +190,9 @@ def step(req: StepRequest):
             rewards = []
             env.reset()
 
-        # ✅ MUST BE INSIDE TRY
+        # --------------------
+        # FINAL RESPONSE
+        # --------------------
         return {
             "observation": obs,
             "reward": reward,
@@ -143,10 +205,26 @@ def step(req: StepRequest):
             f"[STEP] step={step_count} action=error reward=0 done=false error={str(e)}",
             flush=True
         )
+        # --------------------
+# TASK LOGIC
+# --------------------
+    task_status = "in_progress"
+
+    if done:
+       if obs["emotion"] in ["happy", "neutral"]:
+          if step_count <= 4:
+            task_status = "Task 1 (Easy)"
+          elif step_count <= 8:
+            task_status = "Task 2 (Medium)"
+          else:
+            task_status = "Task 3 (Hard)"
+        else:
+           task_status = "Failed"
 
         return {
             "observation": {"emotion": "error"},
             "reward": 0.0,
             "total_reward": sum(rewards),
-            "done": False
+            "done": False,
+            "task": task_status 
         }
