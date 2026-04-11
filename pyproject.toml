@@ -1,8 +1,20 @@
 [project]
-name = "AI-SMART-EMOTIONAL-HEALING-SYSTEM"
+name = "emotion-support"
 version = "1.0.0"
-description = "Emotion AI OpenEnv submission"
 requires-python = ">=3.10"
 
-[tool.setuptools]
-py-modules = []
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "opencv-python-headless",
+    "numpy",
+    "pillow",
+    "torch",
+    "torchvision",
+    "ultralytics",
+    "openai",
+    "openenv-core>=0.2.0"
+]
+
+[project.scripts]
+server = "server.app:app"
