@@ -1,29 +1,48 @@
 FROM python:3.10-slim
 
-# Prevent Python buffering (important for logs)
+# =========================
+# ENV
+# =========================
 ENV PYTHONUNBUFFERED=1
 
-# Set working directory
+# =========================
+# WORKDIR
+# =========================
 WORKDIR /app
 
-# Install system dependencies (OpenCV / YOLO)
+# =========================
+# SYSTEM DEPENDENCIES (IMPORTANT FOR YOLO + CV2)
+# =========================
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libgl1 \
     libxcb1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project files
+# =========================
+# COPY PROJECT
+# =========================
 COPY . .
 
-# Upgrade pip
+# =========================
+# PIP UPGRADE
+# =========================
 RUN pip install --upgrade pip
 
-# Install dependencies
+# =========================
+# REQUIREMENTS
+# =========================
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose HF port
+# =========================
+# EXPOSE HF PORT
+# =========================
 EXPOSE 7860
 
-# Run via module (OpenEnv compliant)
-CMD ["python", "-m", "server.app"]
+# =========================
+# START SERVER (IMPORTANT FIX)
+# =========================
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
