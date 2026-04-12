@@ -6,13 +6,8 @@ import cv2
 from PIL import Image
 import logging
 
-# =========================
-# LOGGER (IMPORTANT FOR HF)
-# =========================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # =========================
 # REQUEST MODEL
@@ -56,13 +51,11 @@ def reset(request: Request):
 @router.post("/step")
 def step(req: StepRequest, request: Request):
     app = request.app
+
     yolo = app.state.yolo
     env = app.state.env
 
     try:
-        # -------------------------
-        # MODEL CHECK
-        # -------------------------
         if yolo is None or env is None:
             logger.error("[ERROR] models not loaded")
             return {
@@ -74,20 +67,13 @@ def step(req: StepRequest, request: Request):
                 "status": "error"
             }
 
-        # -------------------------
-        # START LOG
-        # -------------------------
         if app.state.step == 0:
             logger.info("[START] task=emotion-support")
 
-        # -------------------------
         # IMAGE
-        # -------------------------
         frame = decode(req.image)
 
-        # -------------------------
-        # YOLO FACE DETECTION
-        # -------------------------
+        # YOLO
         results = yolo.predict(frame, device="cpu", conf=0.3, verbose=False)
         box = get_box(results[0].boxes)
 
@@ -115,9 +101,7 @@ def step(req: StepRequest, request: Request):
                 reward = result["reward"]
                 advice = obs["advice"]
 
-        # -------------------------
-        # UPDATE STATE
-        # -------------------------
+        # UPDATE
         app.state.step += 1
         app.state.rewards.append(reward)
 
@@ -128,22 +112,13 @@ def step(req: StepRequest, request: Request):
             emotion in ["happy", "neutral"]
         )
 
-        # -------------------------
-        # STEP LOG (VISIBLE IN HF)
-        # -------------------------
         logger.info(
             f"[STEP] step={app.state.step} emotion={emotion} confidence={confidence:.2f} reward={reward:.2f}"
         )
 
-        # -------------------------
-        # END LOG
-        # -------------------------
         if done:
             logger.info(f"[END] score={total:.2f} steps={app.state.step}")
 
-        # -------------------------
-        # RESPONSE
-        # -------------------------
         response = {
             "emotion": emotion,
             "confidence": confidence,
@@ -153,9 +128,6 @@ def step(req: StepRequest, request: Request):
             "status": "running"
         }
 
-        # -------------------------
-        # RESET AFTER DONE
-        # -------------------------
         if done:
             env.reset()
             app.state.step = 0
@@ -174,3 +146,37 @@ def step(req: StepRequest, request: Request):
             "advice": "",
             "status": "error"
         }
+
+# =========================
+# SAFE MAIN (CRITICAL)
+# =========================
+if __name__ == "__main__":
+    print("[TEST] Running inference.py standalone...", flush=True)
+
+    try:
+        from ultralytics import YOLO
+        from my_env import EmotionEnv
+
+        print("[TEST] Loading models...", flush=True)
+
+        yolo = YOLO("yolov8n-face-lindevs.pt")
+        env = EmotionEnv()
+
+        print("[TEST] Models loaded successfully", flush=True)
+
+        import numpy as np
+        from PIL import Image
+
+        dummy = np.zeros((224, 224, 3), dtype=np.uint8)
+
+        yolo.predict(dummy, device="cpu", verbose=False)
+
+        result = env.step(Image.fromarray(dummy))
+
+        print("[TEST RESULT]", result, flush=True)
+
+        print("[SUCCESS] inference.py executed correctly", flush=True)
+
+    except Exception as e:
+        print("[FATAL ERROR]", repr(e), flush=True)
+        exit(1)
