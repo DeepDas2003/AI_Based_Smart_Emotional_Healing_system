@@ -1,40 +1,35 @@
-import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from ultralytics import YOLO
+from my_env import EmotionEnv
+
+from inference import router
+
+app = FastAPI()
 
 # =========================
-# MAIN APP (ALWAYS RUNNING)
+# LOAD MODELS (ONCE)
 # =========================
-app = FastAPI()
+@app.on_event("startup")
+def load_models():
+    print("[INFO] Loading models...", flush=True)
+
+    app.state.yolo = YOLO("yolov8n-face-lindevs.pt")
+    app.state.env = EmotionEnv()
+
+    app.state.step = 0
+    app.state.rewards = []
+
+    print("[SUCCESS] ALL MODELS LOADED", flush=True)
+
+# =========================
+# ROUTES
+# =========================
+app.include_router(router, prefix="/api")
 
 @app.get("/")
 def home():
-    return {"status": "running"}
-
-
-# =========================
-# INFERENCE LOADER (SAFE)
-# =========================
-inference_app = None
-
-def load_inference():
-    global inference_app
-    try:
-        # Lazy import to prevent startup crash
-        from inference import app as loaded_app
-        inference_app = loaded_app
-        print("[INFO] Inference loaded successfully", flush=True)
-
-    except Exception as e:
-        print("[ERROR] Inference failed:", repr(e), flush=True)
-        inference_app = None
-
-
-# =========================
-# STARTUP EVENT
-# =========================
-@app.on_event("startup")
-def startup():
-    load_inference()
+    return FileResponse("index.html")
 
 
 # =========================
