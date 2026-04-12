@@ -4,18 +4,27 @@ import base64
 import numpy as np
 import cv2
 from PIL import Image
+import sys
 
 router = APIRouter()
 
 # =========================
-# REQUEST
+# SAFE LOGGER (CRITICAL FIX)
+# =========================
+def log(msg: str):
+    sys.stdout.write(msg + "\n")
+    sys.stdout.flush()
+
+
+# =========================
+# REQUEST MODEL
 # =========================
 class StepRequest(BaseModel):
     image: str
 
 
 # =========================
-# UTILS
+# UTIL: decode base64 image
 # =========================
 def decode(img):
     try:
@@ -26,6 +35,9 @@ def decode(img):
         return None
 
 
+# =========================
+# UTIL: get YOLO box
+# =========================
 def get_box(boxes):
     if boxes is None or len(boxes) == 0:
         return None
@@ -42,11 +54,11 @@ def reset(request: Request):
     app.state.step = 0
     app.state.rewards = []
 
-    if app.state.env:
+    if hasattr(app.state, "env") and app.state.env:
         app.state.env.reset()
 
-    # ✔ ONLY ONE START HERE
-    print("[START] task=emotion-support", flush=True)
+    # STRICT START OUTPUT
+    log("[START] task=emotion-support")
 
     return {"status": "reset_done"}
 
@@ -58,30 +70,70 @@ def reset(request: Request):
 def step(req: StepRequest, request: Request):
     app = request.app
 
-    yolo = app.state.yolo
-    env = app.state.env
+    yolo = getattr(app.state, "yolo", None)
+    env = getattr(app.state, "env", None)
+
+    # default response
+    obs = {
+        "emotion": "no_face",
+        "confidence": 0.0,
+        "advice": ""
+    }
+
+    reward = 0.0
 
     try:
 
         # =========================
-        # MODEL CHECK
+        # MODEL NOT LOADED
         # =========================
         if yolo is None or env is None:
-            print(f"[STEP] step={app.state.step} reward=0.00", flush=True)
-            print(f"[END] task=emotion-support score=0.00 steps={app.state.step}", flush=True)
-            return {"status": "model_not_loaded"}
+            log(f"[STEP] step={app.state.step} reward=0.00")
+
+            log(f"[END] task=emotion-support score=0.00 steps={app.state.step}")
+
+            app.state.step = 0
+            app.state.rewards = []
+
+            return {
+                "emotion": "model_not_loaded",
+                "confidence": 0.0,
+                "advice": "",
+                "reward": 0.0,
+                "total_reward": 0.0,
+                "done": True
+            }
 
         # =========================
         # INPUT CHECK
         # =========================
         if not req.image:
-            print(f"[STEP] step={app.state.step} reward=0.00", flush=True)
-            return {"status": "no_input"}
+            log(f"[STEP] step={app.state.step} reward=0.00")
 
+            return {
+                "emotion": "no_input",
+                "confidence": 0.0,
+                "advice": "",
+                "reward": 0.0,
+                "total_reward": sum(app.state.rewards),
+                "done": False
+            }
+
+        # =========================
+        # DECODE IMAGE
+        # =========================
         frame = decode(req.image)
         if frame is None:
-            print(f"[STEP] step={app.state.step} reward=0.00", flush=True)
-            return {"status": "decode_failed"}
+            log(f"[STEP] step={app.state.step} reward=0.00")
+
+            return {
+                "emotion": "decode_failed",
+                "confidence": 0.0,
+                "advice": "",
+                "reward": 0.0,
+                "total_reward": sum(app.state.rewards),
+                "done": False
+            }
 
         # =========================
         # YOLO DETECTION
@@ -89,17 +141,14 @@ def step(req: StepRequest, request: Request):
         results = yolo.predict(frame, device="cpu", verbose=False)
         box = get_box(results[0].boxes)
 
-        reward = 0.0
-        emotion = "no_face"
-
-        if box is not None:
+        if box:
             x1, y1, x2, y2 = box
             face = frame[y1:y2, x1:x2]
 
             if face.size > 0:
                 result = env.step(Image.fromarray(face))
-                emotion = result["obs"]["emotion"]
-                reward = float(result["reward"])
+                obs = result.get("obs", obs)
+                reward = float(result.get("reward", 0.0))
 
         # =========================
         # UPDATE STATE
@@ -109,13 +158,14 @@ def step(req: StepRequest, request: Request):
 
         total_reward = sum(app.state.rewards)
 
+        emotion = obs.get("emotion", "no_face")
+        confidence = float(obs.get("confidence", 0.0))
+        advice = obs.get("advice", "")
+
         # =========================
-        # ✔ STEP LOG (STRICT FORMAT)
+        # STEP LOG (STRICT FORMAT)
         # =========================
-        print(
-            f"[STEP] step={app.state.step} reward={reward:.2f} emotion={emotion}",
-            flush=True
-        )
+        log(f"[STEP] step={app.state.step} reward={reward:.2f}")
 
         # =========================
         # DONE CONDITION
@@ -123,36 +173,39 @@ def step(req: StepRequest, request: Request):
         done = app.state.step >= 12 or emotion in ["happy", "neutral"]
 
         # =========================
-        # ✔ END LOG (STRICT FORMAT)
+        # END LOG (STRICT FORMAT)
         # =========================
         if done:
-            print(
-                f"[END] task=emotion-support score={total_reward:.2f} steps={app.state.step}",
-                flush=True
-            )
+            log(f"[END] task=emotion-support score={total_reward:.2f} steps={app.state.step}")
 
-            # reset state
             app.state.step = 0
             app.state.rewards = []
 
-            if app.state.env:
+            if hasattr(app.state, "env") and app.state.env:
                 app.state.env.reset()
 
         return {
-         "emotion": emotion,
-         "confidence": obs.get("confidence", 0.0),
-         "advice": obs.get("advice", ""),
-         "reward": reward,
-         "total_reward": total_reward,
-         "done": done
+            "emotion": emotion,
+            "confidence": confidence,
+            "advice": advice,
+            "reward": reward,
+            "total_reward": total_reward,
+            "done": done
         }
 
-    except Exception as e:
-        print("[ERROR]", repr(e), flush=True)
-        print(f"[END] task=emotion-support score=0.00 steps={app.state.step}", flush=True)
+    except Exception:
+        # STRICT FAILURE OUTPUT
+        log(f"[STEP] step={app.state.step} reward=0.00")
+        log(f"[END] task=emotion-support score=0.00 steps={app.state.step}")
+
+        app.state.step = 0
+        app.state.rewards = []
 
         return {
             "emotion": "error",
+            "confidence": 0.0,
+            "advice": "",
             "reward": 0.0,
+            "total_reward": 0.0,
             "done": True
         }
