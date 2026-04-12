@@ -18,8 +18,11 @@ from openai import OpenAI
 # =========================
 # ENV VARIABLES (LLM)
 # =========================
+# =========================
+# ENV VARIABLES (LLM)
+# =========================
 API_BASE_URL = os.getenv("API_BASE_URL", "")
-API_KEY = os.getenv("API_KEY", "")   # REQUIRED BY EVALUATOR
+API_KEY = os.getenv("API_KEY", "")   # ✅ REQUIRED BY EVALUATOR
 LLM_MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
 client = None
@@ -33,7 +36,6 @@ if API_BASE_URL and API_KEY:
         print("[INFO] OpenAI proxy client initialized", flush=True)
     except Exception as e:
         print(f"[ERROR] OpenAI init failed: {e}", flush=True)
-
 # =========================
 # CONFIG
 # =========================
