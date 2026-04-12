@@ -15,15 +15,22 @@ from openai import OpenAI
 # =========================
 # ENV VARIABLES (LLM)
 # =========================
+# =========================
+# ENV VARIABLES (LLM)
+# =========================
 API_BASE_URL = os.getenv("API_BASE_URL", "")
+API_KEY = os.getenv("API_KEY", "")   # REQUIRED BY EVALUATOR
 LLM_MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN = os.getenv("HF_TOKEN", "")
 
 client = None
-if API_BASE_URL and HF_TOKEN:
+
+if API_BASE_URL and API_KEY:
     try:
-        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-        print("[INFO] OpenAI client initialized", flush=True)
+        client = OpenAI(
+            base_url=API_BASE_URL,
+            api_key=API_KEY
+        )
+        print("[INFO] OpenAI proxy client initialized", flush=True)
     except Exception as e:
         print(f"[ERROR] OpenAI init failed: {e}", flush=True)
 
@@ -110,7 +117,7 @@ def step(req: StepRequest):
     global step_count, rewards
 
     try:
-        # ✅ FORCE START (important for evaluator)
+        #  FORCE START (important for evaluator)
         if step_count == 0:
             print(f"[START] task={TASK_NAME}", flush=True)
 
@@ -200,10 +207,10 @@ def step(req: StepRequest):
             else:
                 task_status = "Failed"
 
-        # ✅ STEP LOG (STRICT FORMAT)
+        #  STEP LOG (STRICT FORMAT)
         print(f"[STEP] step={step_count} reward={reward:.2f}", flush=True)
 
-        # ✅ END LOG (STRICT FORMAT)
+        # END LOG (STRICT FORMAT)
         if done:
             print(
                 f"[END] task={TASK_NAME} score={result['total_reward']:.2f} steps={step_count}",
