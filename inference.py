@@ -1,81 +1,24 @@
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from typing import Optional
 import base64
-import os
-import cv2
 import numpy as np
+import cv2
 from PIL import Image
-from ultralytics import YOLO
-
-from my_env import EmotionEnv
-from openai import OpenAI
+import logging
 
 # =========================
-# ENV VARIABLES (LLM)
+# LOGGER (IMPORTANT FOR HF)
 # =========================
-# =========================
-# ENV VARIABLES (LLM)
-# =========================
-# =========================
-# ENV VARIABLES (LLM)
-# =========================
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY = os.environ["API_KEY"]  # ✅ REQUIRED BY EVALUATOR
-LLM_MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-client = None
-
-if API_BASE_URL and API_KEY:
-    try:
-        client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=API_KEY
-        )
-        print("[INFO] OpenAI proxy client initialized", flush=True)
-    except Exception as e:
-        print(f"[ERROR] OpenAI init failed: {e}", flush=True)
-# =========================
-# CONFIG
-# =========================
-MODEL_NAME = "emotion-model"
-TASK_NAME = "emotion-support"
-MAX_STEPS = 12
-
-# =========================
-# INIT
-# =========================
-app = FastAPI()
-
-yolo = None
-env = None
-
-@app.on_event("startup")
-def load_models():
-    global yolo, env
-    try:
-        yolo_path = os.path.join(os.getcwd(), "yolov8n-face-lindevs.pt")
-        print(f"[INFO] Loading YOLO from {yolo_path}", flush=True)
-
-        yolo = YOLO(yolo_path)
-        env = EmotionEnv()
-
-        print("[INFO] Models loaded successfully", flush=True)
-    except Exception as e:
-        print(f"[ERROR] Model loading failed: {e}", flush=True)
-
-# =========================
-# STATE
-# =========================
-step_count = 0
-rewards = []
+router = APIRouter()
 
 # =========================
 # REQUEST MODEL
 # =========================
 class StepRequest(BaseModel):
-    image: Optional[str] = None
+    image: str
 
 # =========================
 # UTILS
@@ -91,173 +34,143 @@ def get_box(boxes):
     return tuple(map(int, boxes[0].xyxy[0]))
 
 # =========================
-# HOME
-# =========================
-@app.get("/")
-def home():
-    try:
-        return FileResponse("index.html")
-    except:
-        return {"status": "running"}
-
-# =========================
 # RESET
 # =========================
-@app.post("/reset")
-def reset():
-    global step_count, rewards
-    step_count = 0
-    rewards = []
-    print(f"[START] task={TASK_NAME}", flush=True)
+@router.post("/reset")
+def reset(request: Request):
+    app = request.app
+
+    app.state.step = 0
+    app.state.rewards = []
+
+    if app.state.env:
+        app.state.env.reset()
+
+    logger.info("[RESET] task=emotion-support")
+
     return {"status": "reset_done"}
 
 # =========================
-# STEP API
+# STEP
 # =========================
-@app.post("/step")
-def step(req: StepRequest):
-    global step_count, rewards
+@router.post("/step")
+def step(req: StepRequest, request: Request):
+    app = request.app
+    yolo = app.state.yolo
+    env = app.state.env
 
     try:
-        #  FORCE START (important for evaluator)
-        if step_count == 0:
-            print(f"[START] task={TASK_NAME}", flush=True)
-
-        # --------------------
+        # -------------------------
         # MODEL CHECK
-        # --------------------
+        # -------------------------
         if yolo is None or env is None:
-            print(f"[STEP] step={step_count} reward=0.00", flush=True)
-            print(f"[END] task={TASK_NAME} score={sum(rewards):.2f} steps={step_count}", flush=True)
+            logger.error("[ERROR] models not loaded")
             return {
-                "observation": {"emotion": "model_not_loaded"},
+                "emotion": "model_not_loaded",
+                "confidence": 0.0,
                 "reward": 0.0,
-                "total_reward": sum(rewards),
-                "done": False,
-                "task": "error"
+                "total_reward": 0.0,
+                "advice": "",
+                "status": "error"
             }
 
-        # --------------------
-        # VALIDATION
-        # --------------------
-        if not req or not req.image:
-            print(f"[STEP] step={step_count} reward=0.00", flush=True)
-            return {
-                "observation": {"emotion": "no_input"},
-                "reward": 0.0,
-                "total_reward": sum(rewards),
-                "done": False,
-                "task": "in_progress"
-            }
+        # -------------------------
+        # START LOG
+        # -------------------------
+        if app.state.step == 0:
+            logger.info("[START] task=emotion-support")
 
-        # --------------------
-        # PROCESS IMAGE
-        # --------------------
+        # -------------------------
+        # IMAGE
+        # -------------------------
         frame = decode(req.image)
-        results = yolo.predict(frame, device="cpu", verbose=False)
+
+        # -------------------------
+        # YOLO FACE DETECTION
+        # -------------------------
+        results = yolo.predict(frame, device="cpu", conf=0.3, verbose=False)
         box = get_box(results[0].boxes)
 
         if box is None:
-            print(f"[STEP] step={step_count} reward=0.00", flush=True)
-            return {
-                "observation": {"emotion": "no_face"},
-                "reward": 0.0,
-                "total_reward": sum(rewards),
-                "done": False,
-                "task": "in_progress"
-            }
+            emotion = "no_face"
+            confidence = 0.0
+            reward = 0.0
+            advice = ""
 
-        x1, y1, x2, y2 = box
-        face = frame[y1:y2, x1:x2]
+        else:
+            x1, y1, x2, y2 = box
+            face = frame[y1:y2, x1:x2]
 
-        result = env.step(Image.fromarray(face))
-        obs = result["obs"]
-        reward = float(result["reward"])
-
-        # --------------------
-        # OPTIONAL LLM
-        # --------------------
-        if client:
-            try:
-                response = client.chat.completions.create(
-                    model=LLM_MODEL_NAME,
-                    messages=[
-                        {"role": "user", "content": f"Advice for emotion: {obs['emotion']}"}
-                    ]
-                )
-                obs["advice"] = response.choices[0].message.content.strip()
-            except Exception as e:
-                print(f"[ERROR] LLM failed: {e}", flush=True)
-
-        step_count += 1
-        rewards.append(reward)
-
-        done = obs["emotion"] in ["happy", "neutral"] or step_count >= MAX_STEPS
-
-        # --------------------
-        # TASK LOGIC
-        # --------------------
-        task_status = "in_progress"
-        if done:
-            if obs["emotion"] in ["happy", "neutral"]:
-                if step_count <= 4:
-                    task_status = "Task 1 (Easy)"
-                elif step_count <= 8:
-                    task_status = "Task 2 (Medium)"
-                else:
-                    task_status = "Task 3 (Hard)"
+            if face.size == 0:
+                emotion = "no_face"
+                confidence = 0.0
+                reward = 0.0
+                advice = ""
             else:
-                task_status = "Failed"
+                result = env.step(Image.fromarray(face))
 
-        #  STEP LOG (STRICT FORMAT)
-        print(f"[STEP] step={step_count} reward={reward:.2f}", flush=True)
+                obs = result["obs"]
+                emotion = obs["emotion"]
+                confidence = obs["confidence"]
+                reward = result["reward"]
+                advice = obs["advice"]
 
-        # END LOG (STRICT FORMAT)
+        # -------------------------
+        # UPDATE STATE
+        # -------------------------
+        app.state.step += 1
+        app.state.rewards.append(reward)
+
+        total = sum(app.state.rewards)
+
+        done = (
+            app.state.step >= 12 or
+            emotion in ["happy", "neutral"]
+        )
+
+        # -------------------------
+        # STEP LOG (VISIBLE IN HF)
+        # -------------------------
+        logger.info(
+            f"[STEP] step={app.state.step} emotion={emotion} confidence={confidence:.2f} reward={reward:.2f}"
+        )
+
+        # -------------------------
+        # END LOG
+        # -------------------------
         if done:
-            print(
-                f"[END] task={TASK_NAME} score={result['total_reward']:.2f} steps={step_count}",
-                flush=True
-            )
-            step_count = 0
-            rewards = []
-            env.reset()
+            logger.info(f"[END] score={total:.2f} steps={app.state.step}")
 
-        return {
-            "observation": obs,
+        # -------------------------
+        # RESPONSE
+        # -------------------------
+        response = {
+            "emotion": emotion,
+            "confidence": confidence,
             "reward": reward,
-            "total_reward": result["total_reward"],
-            "done": done,
-            "task": task_status
+            "total_reward": total,
+            "advice": advice,
+            "status": "running"
         }
 
+        # -------------------------
+        # RESET AFTER DONE
+        # -------------------------
+        if done:
+            env.reset()
+            app.state.step = 0
+            app.state.rewards = []
+
+        return response
+
     except Exception as e:
-        print(f"[STEP] step={step_count} reward=0.00", flush=True)
-        print(f"[END] task={TASK_NAME} score={sum(rewards):.2f} steps={step_count}", flush=True)
+        logger.error(f"[ERROR] {repr(e)}")
 
         return {
-            "observation": {"emotion": "error"},
+            "emotion": "error",
+            "confidence": 0.0,
             "reward": 0.0,
-            "total_reward": sum(rewards),
-            "done": False,
-            "task": "error"
+            "total_reward": 0.0,
+            "advice": "",
+            "status": "error"
         }
-# =========================
-# FALLBACK EXECUTION (VERY IMPORTANT)
-# =========================
-if __name__ == "__main__":
-    try:
-        # Simulate 1 step so evaluator sees logs
-        print(f"[START] task={TASK_NAME}", flush=True)
-
-        # Fake minimal step (no image needed)
-        reward = 0.5
-        step = 1
-
-        print(f"[STEP] step={step} reward={reward:.2f}", flush=True)
-
-        print(f"[END] task={TASK_NAME} score={reward:.2f} steps={step}", flush=True)
-
-    except Exception as e:
-        print(f"[START] task={TASK_NAME}", flush=True)
-        print(f"[STEP] step=0 reward=0.00", flush=True)
-        print(f"[END] task={TASK_NAME} score=0.00 steps=0", flush=True)
