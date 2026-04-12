@@ -1,25 +1,44 @@
 import uvicorn
 from fastapi import FastAPI
 
-# Fallback app (if inference fails)
-fallback_app = FastAPI()
+# =========================
+# MAIN APP (ALWAYS RUNNING)
+# =========================
+app = FastAPI()
 
-@fallback_app.get("/")
-def fallback():
-    return {"status": "error loading inference"}
+@app.get("/")
+def home():
+    return {"status": "running"}
 
-# Try to import your main app
-try:
-    from inference import app as inference_app
-    app = inference_app
-    print("[INFO] Inference app loaded successfully", flush=True)
-
-except Exception as e:
-    print(f"[ERROR] Failed to load inference app: {e}", flush=True)
-    app = fallback_app  # prevent crash
 
 # =========================
-# OpenEnv Entry Point
+# INFERENCE LOADER (SAFE)
+# =========================
+inference_app = None
+
+def load_inference():
+    global inference_app
+    try:
+        # Lazy import to prevent startup crash
+        from inference import app as loaded_app
+        inference_app = loaded_app
+        print("[INFO] Inference loaded successfully", flush=True)
+
+    except Exception as e:
+        print("[ERROR] Inference failed:", repr(e), flush=True)
+        inference_app = None
+
+
+# =========================
+# STARTUP EVENT
+# =========================
+@app.on_event("startup")
+def startup():
+    load_inference()
+
+
+# =========================
+# ENTRY POINT
 # =========================
 def main():
     uvicorn.run(
@@ -28,8 +47,6 @@ def main():
         port=7860
     )
 
-# =========================
-# Required callable
-# =========================
+
 if __name__ == "__main__":
     main()
