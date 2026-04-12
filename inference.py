@@ -21,8 +21,8 @@ from openai import OpenAI
 # =========================
 # ENV VARIABLES (LLM)
 # =========================
-API_BASE_URL = os.getenv("API_BASE_URL", "")
-API_KEY = os.getenv("API_KEY", "")   # ✅ REQUIRED BY EVALUATOR
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY = os.environ["API_KEY"]  # ✅ REQUIRED BY EVALUATOR
 LLM_MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
 client = None
