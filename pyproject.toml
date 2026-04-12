@@ -6,8 +6,8 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi",
     "uvicorn",
-    "opencv-python-headless",
     "numpy",
+    "opencv-python-headless",
     "pillow",
     "torch",
     "torchvision",
@@ -16,8 +16,5 @@ dependencies = [
     "openenv-core>=0.2.0"
 ]
 
-# =========================
-# FIX 1: ENTRYPOINT MUST MATCH uvicorn target
-# =========================
 [project.scripts]
 server = "server.app:main"
