@@ -16,6 +16,8 @@ dependencies = [
     "openenv-core>=0.2.0"
 ]
 
-# OpenEnv requires a callable entrypoint
+# =========================
+# FIX 1: ENTRYPOINT MUST MATCH uvicorn target
+# =========================
 [project.scripts]
 server = "server.app:main"
